@@ -23,3 +23,6 @@ golang provides net.FileConn can make it.
 5. ./tcpbinddev -addr 192.168.1.1:6666 -device eth1 //if tcp syn send out from eth1, it means bind device successfully
 
 ## this only works in linux for now
+
+## how tcp dial in golang
+   [golang tcp dial and join netPoll](https://github.com/jursonmo/tcpbinddev/issues/1)
