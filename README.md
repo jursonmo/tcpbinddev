@@ -15,11 +15,11 @@ but "internal/poll" is not-export.
 golang provides net.FileConn can make it. 
 
 
-##how to check:
+## how to check:
 1. ifconfig eth0 192.168.1.2/24 //here mask 255.255.255.0
 2. ifconfig eth1 192.168.1.3/16 //here mask 255.255.0.0
 3. ping 192.168.1.1, icmp packet will be send to eth0, because route mask longest match
 4. ping 192.168.1.1 -I eth1, will send to eth1
 5. ./tcpbinddev -addr 192.168.1.1:6666 -device eth1 //if tcp syn send out from eth1, it means bind device successfully
 
-##this only works in linux for now
+## this only works in linux for now
