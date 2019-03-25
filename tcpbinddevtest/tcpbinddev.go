@@ -3,9 +3,11 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/jursonmo/tcpbinddev"
 	"runtime"
 	"sync"
+	"time"
+
+	"github.com/jursonmo/tcpbinddev"
 )
 
 /*
@@ -18,7 +20,7 @@ testting example:
 */
 func main() {
 	var addr, device string
-	flag.StringVar(&addr, "addr", "127.0.0.1:6666", "dst addr")
+	flag.StringVar(&addr, "addr", "127.0.0.1:8090", "dst addr")
 	flag.StringVar(&device, "device", "", "bind device")
 	flag.Parse()
 	pn := 1
@@ -34,18 +36,23 @@ func main() {
 			fmt.Println("TcpBindToDev", err)
 			return
 		}
-		fmt.Printf("goroutine id=%d, localaddr:%s, remote:%s\n",
+		defer conn.Close()
+		fmt.Printf("connect successfully: goroutine id=%d, localaddr:%s, remote:%s\n",
 			index, conn.LocalAddr().String(), conn.RemoteAddr().String())
 
+		time.Sleep(time.Second * 3) //wait for other goroutine connect success
 		buf := make([]byte, 1024)
-		for {
+		i := 0
+		for i < 3 {
 			n, err := conn.Read(buf)
 			if err != nil {
 				fmt.Println("read err:", err)
 				return
 			}
+			i++
 			fmt.Printf("goroutine id=%d, read buf:%s\n", index, string(buf[:n]))
 		}
+		fmt.Printf("goroutine id=%d, quit read \n", index)
 	}
 	//testing: if tcpbinddev put conn to netPoll successfully
 	//there will be two goroutine run on one system thread
@@ -54,4 +61,6 @@ func main() {
 		go f(i)
 	}
 	wg.Wait()
+	//check: lsof -p `pidof tcpbinddev`, make sure socket have closed, and no file descriptor leak
+	time.Sleep(time.Hour)
 }
