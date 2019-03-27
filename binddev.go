@@ -1,15 +1,19 @@
 package tcpbinddev
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/pkg/errors"
 )
 
-func TcpBindToDev(network, addr, device string, timeout int) (net.Conn, error) {
+//timeout is seconds
+func TcpBindToDev(network, addr, saddr, device string, timeout int) (net.Conn, error) {
 	if network == "" || addr == "" {
 		return nil, errors.New("network or addr not set")
 	}
@@ -96,6 +100,7 @@ func getSockaddr(network, addr string) (sa syscall.Sockaddr, soType int, err err
 		return nil, -1, errors.New("Unknown network type " + network)
 	}
 }
+
 func fdSetOpt(fd int, network, saddr string, device string) error {
 	var err error
 
@@ -127,4 +132,62 @@ func fdSetOpt(fd int, network, saddr string, device string) error {
 		}
 	}
 	return nil
+}
+type timeoutError struct{}
+
+func (timeoutError) Error() string   { return "tls: DialWithDialer timed out" }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return true }
+
+//timeout is seconds
+func TlsBindToDev(network, addr, saddr, device string, timeout int, config *tls.Config) (net.Conn, error) {
+	colonPos := strings.LastIndex(addr, ":")
+	if colonPos == -1 {
+		colonPos = len(addr)
+	}
+	hostname := addr[:colonPos]
+
+	if config == nil {
+		return nil, fmt.Errorf("config is not set")
+	}
+	// If no ServerName is set, infer the ServerName
+	// from the hostname we're connecting to.
+	if config.ServerName == "" {
+		// Make a copy to avoid polluting argument or default.
+		c := config.Clone()
+		c.ServerName = hostname
+		config = c
+	}
+
+	var errChannel chan error
+
+	if timeout != 0 {
+		errChannel = make(chan error, 2)
+		time.AfterFunc(time.Second*time.Duration(timeout), func() {
+			errChannel <- timeoutError{}
+		})
+	}
+
+	rawConn, err := TcpBindToDev(network, addr, saddr, device, timeout)
+	if err != nil {
+		return nil, err
+	}
+	conn := tls.Client(rawConn, config)
+
+	if timeout == 0 {
+		err = conn.Handshake()
+	} else {
+		go func() {
+			errChannel <- conn.Handshake()
+		}()
+
+		err = <-errChannel
+	}
+
+	if err != nil {
+		rawConn.Close()
+		return nil, err
+	}
+
+	return conn, nil
 }

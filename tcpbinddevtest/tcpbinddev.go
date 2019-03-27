@@ -1,8 +1,10 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
+	"net"
 	"runtime"
 	"sync"
 	"time"
@@ -19,9 +21,11 @@ testting example:
 	./tcpbinddev -addr 192.168.1.1:6666 -device eth1 //if tcp syn send out from eth1, it means bind device successfully
 */
 func main() {
-	var addr, device string
+	var addr, device, proto string
 	flag.StringVar(&addr, "addr", "127.0.0.1:8090", "dst addr")
+	flag.StringVar(&addr, "saddr", "", "src addr, like x.x.x.x:8090")
 	flag.StringVar(&device, "device", "", "bind device")
+	flag.StringVar(&proto, "proto", "tcp", "tcp or tls")
 	flag.Parse()
 	pn := 1
 	old := runtime.GOMAXPROCS(pn)
@@ -31,9 +35,19 @@ func main() {
 	var wg sync.WaitGroup
 	f := func(index int) {
 		defer wg.Done()
-		conn, err := tcpbinddev.TcpBindToDev(network, addr, "", device, dialTimeout)
+		var conn net.Conn
+		var err error
+		if proto == "tls" {
+			tlsconf := &tls.Config{
+				InsecureSkipVerify: true,
+			}
+			conn, err = tcpbinddev.TlsBindToDev(network, addr, "", device, dialTimeout, tlsconf)
+		} else {
+			conn, err = tcpbinddev.TcpBindToDev(network, addr, "", device, dialTimeout)
+		}
+
 		if err != nil {
-			fmt.Println("TcpBindToDev", err)
+			fmt.Println("main,TcpBindToDev", err)
 			return
 		}
 		defer conn.Close()
