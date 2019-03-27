@@ -31,7 +31,7 @@ func main() {
 	var wg sync.WaitGroup
 	f := func(index int) {
 		defer wg.Done()
-		conn, err := tcpbinddev.TcpBindToDev(network, addr, device, dialTimeout)
+		conn, err := tcpbinddev.TcpBindToDev(network, addr, "", device, dialTimeout)
 		if err != nil {
 			fmt.Println("TcpBindToDev", err)
 			return

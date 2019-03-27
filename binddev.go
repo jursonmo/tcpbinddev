@@ -22,15 +22,13 @@ func TcpBindToDev(network, addr, device string, timeout int) (net.Conn, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "newSocketCloexec->")
 	}
-	if device != "" {
-		err = syscall.BindToDevice(fd, device)
-		if err != nil {
-			syscall.Close(fd)
-			return nil, errors.Wrap(err, "BindToDevice->")
-		}
-	}
 	fmt.Printf("fd:%d\n", fd)
 
+	err = fdSetOpt(fd, network, saddr, device)
+	if err != nil {
+		syscall.Close(fd)
+		return nil, err
+	}
 	err = syscall.Connect(fd, sa)
 	if err != nil && err.(syscall.Errno) != syscall.EINPROGRESS {
 		//EINPROGRESS: The socket is nonblocking and the  connection  cannot  be  completed immediately.
@@ -97,4 +95,36 @@ func getSockaddr(network, addr string) (sa syscall.Sockaddr, soType int, err err
 	default:
 		return nil, -1, errors.New("Unknown network type " + network)
 	}
+}
+func fdSetOpt(fd int, network, saddr string, device string) error {
+	var err error
+
+	if err = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
+		return fmt.Errorf("cannot enable SO_REUSEADDR: %s", err)
+	}
+
+	// This should disable Nagle's algorithm in all accepted sockets by default.
+	// Users may enable it with net.TCPConn.SetNoDelay(false).
+	if err = syscall.SetsockoptInt(fd, syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1); err != nil {
+		return fmt.Errorf("cannot disable Nagle's algorithm: %s", err)
+	}
+
+	if device != "" {
+		err = syscall.BindToDevice(fd, device)
+		if err != nil {
+			return errors.Wrap(err, "BindToDevice->")
+		}
+	}
+
+	if network != "" && saddr != "" {
+		sa, _, err := getSockaddr(network, saddr)
+		if err != nil {
+			return errors.Wrap(err, "getSockaddr->")
+		}
+		err = syscall.Bind(fd, sa)
+		if err != nil {
+			return errors.Wrap(err, fmt.Sprintf("Bind Saddr:%s fail->", saddr))
+		}
+	}
+	return nil
 }
