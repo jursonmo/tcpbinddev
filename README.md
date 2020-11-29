@@ -12,7 +12,11 @@
 
 but "internal/poll" is not-export.
 
-golang provides net.FileConn can make it. 
+golang provides (os.NewFile,net.FileConn) can make it. 
+```go
+file := os.NewFile(uintptr(fd), name)
+conn, err := net.FileConn(file)
+```
 
 
 ## how to check:
