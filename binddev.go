@@ -2,14 +2,13 @@ package tcpbinddev
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"strings"
 	"syscall"
 	"time"
-
-	"github.com/pkg/errors"
 )
 
 //timeout is seconds
@@ -19,58 +18,48 @@ func TcpBindToDev(network, addr, saddr, device string, timeout int) (net.Conn, e
 	}
 	sa, soType, err := getSockaddr(network, addr)
 	if err != nil {
-		return nil, errors.Wrap(err, "getSockaddr->")
+		return nil, fmt.Errorf("cannot get sockaddr from %s://%s: %w", network, addr, err)
 	}
 
 	fd, err := newSocketCloexec(soType, syscall.SOCK_STREAM, syscall.IPPROTO_TCP)
 	if err != nil {
-		return nil, errors.Wrap(err, "newSocketCloexec->")
+		return nil, fmt.Errorf("cannot create socket: %w", err)
 	}
-	fmt.Printf("fd:%d\n", fd)
+	defer syscall.Close(fd)
 
 	err = fdSetOpt(fd, network, saddr, device)
 	if err != nil {
-		syscall.Close(fd)
 		return nil, err
 	}
 	err = syscall.Connect(fd, sa)
 	if err != nil && err.(syscall.Errno) != syscall.EINPROGRESS {
-		//EINPROGRESS: The socket is nonblocking and the  connection  cannot  be  completed immediately.
-		syscall.Close(fd)
-		return nil, errors.Wrap(err, "Connect->")
+		// EINPROGRESS: The socket is nonblocking and the  connection  cannot  be  completed immediately.
+		return nil, fmt.Errorf("cannot connect to %s://%s: %w", network, addr, err)
 	}
 	err = connectTimeout(fd, timeout)
 	if err != nil {
-		syscall.Close(fd)
-		return nil, errors.Wrap(err, "connectTimeout->")
+		return nil, fmt.Errorf("cannot connect to %s://%s: %w", network, addr, err)
 	}
-
-	//now set nonblocking
-	// err = syscall.SetNonblock(fd, true)
-	// if err != nil {
-	// 	syscall.Close(fd)
-	// 	return nil, errors.Wrap(err, "SetNonblock->")
-	// }
 
 	name := "tcp socket to netPoll"
 	file := os.NewFile(uintptr(fd), name)
 	conn, err := net.FileConn(file)
 	if err != nil {
 		file.Close()
-		return nil, errors.Wrap(err, "FileConn->")
+		return nil, fmt.Errorf("cannot create file connection: %w", err)
 	}
 
-	//close file does not affect conn
+	// close file does not affect conn
 	if err := file.Close(); err != nil {
 		conn.Close()
-		return nil, errors.Wrap(err, "file.Close() error->")
+		return nil, fmt.Errorf("cannot close file connection: %w", err)
 	}
 	return conn, nil
 }
 
 func getSockaddr(network, addr string) (sa syscall.Sockaddr, soType int, err error) {
 	if network != "tcp4" && network != "tcp6" {
-		return nil, -1, errors.New("only tcp4 and tcp6 network is supported")
+		return nil, -1, fmt.Errorf("only tcp4 and tcp6 network is supported, got %s", network)
 	}
 
 	tcpAddr, err := net.ResolveTCPAddr(network, addr)
@@ -97,7 +86,7 @@ func getSockaddr(network, addr string) (sa syscall.Sockaddr, soType int, err err
 		}
 		return &sa6, syscall.AF_INET6, nil
 	default:
-		return nil, -1, errors.New("Unknown network type " + network)
+		return nil, -1, fmt.Errorf("only tcp4 and tcp6 network is supported, got %s", network)
 	}
 }
 
@@ -111,28 +100,28 @@ func fdSetOpt(fd int, network, saddr string, device string) error {
 	// This should disable Nagle's algorithm in all accepted sockets by default.
 	// Users may enable it with net.TCPConn.SetNoDelay(false).
 	if err = syscall.SetsockoptInt(fd, syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1); err != nil {
-		return fmt.Errorf("cannot disable Nagle's algorithm: %s", err)
+		return fmt.Errorf("cannot disable Nagle's algorithm: %w", err)
 	}
 
 	if device != "" {
-		err = syscall.BindToDevice(fd, device)
-		if err != nil {
-			return errors.Wrap(err, "BindToDevice->")
+		if err = bindToInterface(fd, device); err != nil {
+			return fmt.Errorf("cannot bind socket fd=%d to interface %s: %w", fd, device, err)
 		}
 	}
 
 	if network != "" && saddr != "" {
 		sa, _, err := getSockaddr(network, saddr)
 		if err != nil {
-			return errors.Wrap(err, "getSockaddr->")
+			return fmt.Errorf("cannot get sockaddr: %w", err)
 		}
 		err = syscall.Bind(fd, sa)
 		if err != nil {
-			return errors.Wrap(err, fmt.Sprintf("Bind Saddr:%s fail->", saddr))
+			return fmt.Errorf("cannot bind socket fd=%d to saddr=%s: %w", fd, saddr, err)
 		}
 	}
 	return nil
 }
+
 type timeoutError struct{}
 
 func (timeoutError) Error() string   { return "tls: DialWithDialer timed out" }

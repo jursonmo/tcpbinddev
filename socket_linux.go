@@ -1,13 +1,10 @@
-// +build !darwin
+// +build linux
 
 package tcpbinddev
 
 import (
 	"fmt"
 	"syscall"
-	"time"
-
-	"github.com/pkg/errors"
 )
 
 func newSocketCloexec(domain, typ, proto int) (int, error) {
@@ -21,7 +18,7 @@ func newSocketCloexec(domain, typ, proto int) (int, error) {
 		return newSocketCloexecOld(domain, typ, proto)
 	}
 
-	return -1, fmt.Errorf("cannot create listening unblocked socket: %s", err)
+	return -1, fmt.Errorf("cannot create listening unblocked socket: %w", err)
 }
 
 func newSocketCloexecOld(domain, typ, proto int) (int, error) {
@@ -32,34 +29,38 @@ func newSocketCloexecOld(domain, typ, proto int) (int, error) {
 	}
 	syscall.ForkLock.RUnlock()
 	if err != nil {
-		return -1, fmt.Errorf("cannot create listening socket: %s", err)
+		return -1, fmt.Errorf("cannot create listening socket: %w", err)
 	}
 	if err = syscall.SetNonblock(fd, true); err != nil {
 		syscall.Close(fd)
-		return -1, fmt.Errorf("cannot make non-blocked listening socket: %s", err)
+		return -1, fmt.Errorf("cannot make non-blocked listening socket: %w", err)
 	}
 	return fd, nil
 }
 
 // fd is noblock, select to check fd if ok
 func connectTimeout(fd, seconds int) error {
-	fmt.Println("Select for connect ......", time.Now())
 	w := &FDSet{}
 	w.Zero()
 	w.Set(uintptr(fd))
-	ret, e := syscall.Select(fd+1, nil, (*syscall.FdSet)(w), nil, &syscall.Timeval{Sec: int64(seconds)})
-	fmt.Printf("Select over:ret=%d, time:%s\n", ret, time.Now())
-	if e != nil {
-		return errors.Wrap(e, "Select->")
+	ret, err := syscall.Select(fd+1, nil, (*syscall.FdSet)(w), nil, &syscall.Timeval{Sec: int64(seconds)})
+	if err != nil {
+		return fmt.Errorf("cannot select fd=%d: %w", fd, err)
 	}
 	if ret <= 0 {
-		return errors.New("Select->")
+		return fmt.Errorf("cannot select fd=%d: %d", fd, ret)
 	}
-	v, _ := syscall.GetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_ERROR)
-	if v != 0 {
-		return errors.New("GetsockoptInt->")
+	v, err := syscall.GetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_ERROR)
+	if err != nil {
+		return fmt.Errorf("cannot get SO_ERROR socket options: %w", err)
+	} else if v != 0 {
+		return fmt.Errorf("there is error on the socket: %d", v)
 	}
 	return nil
+}
+
+func bindToInterface(fd int, ifaceName string) error {
+	return syscall.BindToDevice(fd, ifaceName)
 }
 
 /*
