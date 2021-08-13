@@ -1,3 +1,3 @@
-module github.com/jursonmo/tcpbinddev
+module github.com/tanshihaj/tcpbinddev
 
 go 1.16
